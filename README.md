@@ -233,15 +233,6 @@ Both sender and receiver pages also show real-time logs.
 - Validate all incoming messages
 - Use secure TURN credentials
 
-## 📈 Next Steps (Phase 3)
-
-- [ ] Add audio streaming
-- [ ] Implement recording functionality
-- [ ] Add chat/text messaging
-- [ ] Multiple receiver support
-- [ ] Screen sharing capability
-- [ ] Quality adaptation based on bandwidth
-
 ## 🆘 Support
 
 If you encounter issues:
