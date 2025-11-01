@@ -1,0 +1,28 @@
+{
+  "name": "webrtc-video-streaming",
+  "version": "1.0.0",
+  "description": "WebRTC video streaming with TURN server support",
+  "main": "signaling-server.js",
+  "scripts": {
+    "start": "node signaling-server.js",
+    "start-secure": "node signaling-server-secure.js",
+    "generate-cert": "bash generate-cert.sh",
+    "dev": "nodemon signaling-server.js"
+  },
+  "keywords": [
+    "webrtc",
+    "video",
+    "streaming",
+    "turn",
+    "signaling"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "ws": "^8.14.2",
+    "express": "^4.18.2"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  }
+}

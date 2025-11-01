@@ -1,0 +1,539 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Video Sender (Phone)</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+            color: white;
+        }
+        
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+        }
+        
+        h1 {
+            text-align: center;
+            margin-bottom: 30px;
+            font-size: 28px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.2);
+        }
+        
+        .status-card {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 15px;
+            padding: 20px;
+            margin-bottom: 20px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        
+        .status-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+            font-size: 14px;
+        }
+        
+        .status-label {
+            opacity: 0.9;
+        }
+        
+        .status-value {
+            font-weight: bold;
+            padding: 5px 12px;
+            border-radius: 20px;
+            background: rgba(255, 255, 255, 0.2);
+        }
+        
+        .status-value.connected {
+            background: #10b981;
+        }
+        
+        .status-value.disconnected {
+            background: #ef4444;
+        }
+        
+        .status-value.connecting {
+            background: #f59e0b;
+        }
+        
+        video {
+            width: 100%;
+            border-radius: 15px;
+            background: black;
+            margin-bottom: 20px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+        }
+        
+        .controls {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+        
+        button {
+            padding: 15px 30px;
+            font-size: 16px;
+            font-weight: bold;
+            border: none;
+            border-radius: 10px;
+            cursor: pointer;
+            transition: all 0.3s;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        
+        button:active {
+            transform: scale(0.95);
+        }
+        
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        .btn-primary {
+            background: #10b981;
+            color: white;
+        }
+        
+        .btn-primary:hover:not(:disabled) {
+            background: #059669;
+        }
+        
+        .btn-danger {
+            background: #ef4444;
+            color: white;
+        }
+        
+        .btn-danger:hover:not(:disabled) {
+            background: #dc2626;
+        }
+        
+        .settings {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 15px;
+            padding: 20px;
+            margin-bottom: 20px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        
+        .settings h3 {
+            margin-bottom: 15px;
+            font-size: 18px;
+        }
+        
+        .setting-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+        
+        select {
+            padding: 8px 15px;
+            border-radius: 8px;
+            border: none;
+            background: rgba(255, 255, 255, 0.9);
+            color: #333;
+            font-size: 14px;
+            min-width: 120px;
+        }
+        
+        .logs {
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 10px;
+            padding: 15px;
+            max-height: 200px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 12px;
+            margin-top: 20px;
+        }
+        
+        .log-entry {
+            margin-bottom: 5px;
+            opacity: 0.9;
+        }
+        
+        .log-entry.error {
+            color: #fca5a5;
+        }
+        
+        .log-entry.success {
+            color: #86efac;
+        }
+        
+        .log-entry.info {
+            color: #bfdbfe;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📱 Video Sender</h1>
+        
+        <div class="status-card">
+            <div class="status-item">
+                <span class="status-label">Signaling Server:</span>
+                <span class="status-value disconnected" id="signalingStatus">Disconnected</span>
+            </div>
+            <div class="status-item">
+                <span class="status-label">WebRTC Connection:</span>
+                <span class="status-value disconnected" id="webrtcStatus">Not Connected</span>
+            </div>
+            <div class="status-item">
+                <span class="status-label">Camera:</span>
+                <span class="status-value disconnected" id="cameraStatus">Not Started</span>
+            </div>
+        </div>
+        
+        <video id="localVideo" autoplay playsinline muted></video>
+        
+        <div class="settings">
+            <h3>Video Settings</h3>
+            <div class="setting-row">
+                <label>Resolution:</label>
+                <select id="resolutionSelect">
+                    <option value="640x480">640x480 (SD)</option>
+                    <option value="1280x720" selected>1280x720 (HD)</option>
+                    <option value="1920x1080">1920x1080 (Full HD)</option>
+                </select>
+            </div>
+            <div class="setting-row">
+                <label>Frame Rate:</label>
+                <select id="fpsSelect">
+                    <option value="15">15 fps</option>
+                    <option value="24">24 fps</option>
+                    <option value="30" selected>30 fps</option>
+                </select>
+            </div>
+            <div class="setting-row">
+                <label>Camera:</label>
+                <select id="cameraSelect">
+                    <option value="user">Front Camera</option>
+                    <option value="environment">Back Camera</option>
+                </select>
+            </div>
+        </div>
+        
+        <div class="controls">
+            <button class="btn-primary" id="startBtn" onclick="startCamera()">Start Camera</button>
+            <button class="btn-primary" id="connectBtn" onclick="connectSignaling()" disabled>Connect to Server</button>
+            <button class="btn-danger" id="stopBtn" onclick="stopStreaming()" disabled>Stop Streaming</button>
+        </div>
+        
+        <div class="logs" id="logs"></div>
+    </div>
+
+    <script>
+        // Configuration
+        const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const SIGNALING_SERVER = `${wsProtocol}//${window.location.hostname}:8080`;
+        
+        // Global variables
+        let localStream = null;
+        let peerConnection = null;
+        let signalingSocket = null;
+        let isConnected = false;
+        
+        // TURN configuration (will be received from server)
+        let turnConfig = null;
+        
+        // Logging
+        function log(message, type = 'info') {
+            const logsDiv = document.getElementById('logs');
+            const entry = document.createElement('div');
+            entry.className = `log-entry ${type}`;
+            const timestamp = new Date().toLocaleTimeString();
+            entry.textContent = `[${timestamp}] ${message}`;
+            logsDiv.appendChild(entry);
+            logsDiv.scrollTop = logsDiv.scrollHeight;
+            console.log(`[${type.toUpperCase()}] ${message}`);
+        }
+        
+        function updateStatus(element, status, text) {
+            const statusEl = document.getElementById(element);
+            statusEl.className = `status-value ${status}`;
+            statusEl.textContent = text;
+        }
+        
+        // Start camera
+        async function startCamera() {
+            try {
+                // Check if getUserMedia is available
+                if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                    const protocol = window.location.protocol;
+                    const isSecure = protocol === 'https:';
+                    const isLocalhost = window.location.hostname === 'localhost' || 
+                                      window.location.hostname === '127.0.0.1';
+                    
+                    let errorMsg = 'Camera access is not available.\n\n';
+                    
+                    if (!isSecure && !isLocalhost) {
+                        errorMsg += 'HTTPS is required for camera access on this device.\n\n';
+                        errorMsg += 'Solution:\n';
+                        errorMsg += '1. On your laptop, run: ./generate-cert.sh\n';
+                        errorMsg += '2. Start server: node signaling-server-secure.js\n';
+                        errorMsg += '3. Access via HTTPS: https://' + window.location.host;
+                    } else {
+                        errorMsg += 'Your browser may not support camera access.\n';
+                        errorMsg += 'Try using Chrome, Firefox, or Safari.';
+                    }
+                    
+                    log(errorMsg.replace(/\n/g, ' '), 'error');
+                    alert(errorMsg);
+                    return;
+                }
+                
+                log('Requesting camera access...', 'info');
+                
+                const resolution = document.getElementById('resolutionSelect').value.split('x');
+                const fps = parseInt(document.getElementById('fpsSelect').value);
+                const facingMode = document.getElementById('cameraSelect').value;
+                
+                const constraints = {
+                    video: {
+                        width: { ideal: parseInt(resolution[0]) },
+                        height: { ideal: parseInt(resolution[1]) },
+                        frameRate: { ideal: fps },
+                        facingMode: facingMode
+                    },
+                    audio: false
+                };
+                
+                localStream = await navigator.mediaDevices.getUserMedia(constraints);
+                document.getElementById('localVideo').srcObject = localStream;
+                
+                updateStatus('cameraStatus', 'connected', 'Active');
+                log('Camera started successfully', 'success');
+                
+                document.getElementById('startBtn').disabled = true;
+                document.getElementById('connectBtn').disabled = false;
+                
+            } catch (error) {
+                log(`Camera error: ${error.message}`, 'error');
+                
+                let errorMsg = 'Failed to access camera.\n\n';
+                
+                if (error.name === 'NotAllowedError' || error.name === 'PermissionDeniedError') {
+                    errorMsg += 'Permission denied. Please:\n';
+                    errorMsg += '1. Check browser permissions\n';
+                    errorMsg += '2. Reload the page\n';
+                    errorMsg += '3. Grant camera access when prompted';
+                } else if (error.name === 'NotFoundError') {
+                    errorMsg += 'No camera found on this device.';
+                } else if (error.name === 'NotReadableError') {
+                    errorMsg += 'Camera is in use by another application.';
+                } else {
+                    errorMsg += 'Error: ' + error.message;
+                }
+                
+                alert(errorMsg);
+            }
+        }
+        
+        // Connect to signaling server
+        function connectSignaling() {
+            log('Connecting to signaling server...', 'info');
+            updateStatus('signalingStatus', 'connecting', 'Connecting');
+            
+            signalingSocket = new WebSocket(SIGNALING_SERVER);
+            
+            signalingSocket.onopen = () => {
+                log('Connected to signaling server', 'success');
+                updateStatus('signalingStatus', 'connected', 'Connected');
+                
+                // Register as sender
+                signalingSocket.send(JSON.stringify({
+                    type: 'register',
+                    role: 'sender'
+                }));
+            };
+            
+            signalingSocket.onmessage = async (event) => {
+                const message = JSON.parse(event.data);
+                log(`Received: ${message.type}`, 'info');
+                
+                switch(message.type) {
+                    case 'welcome':
+                        turnConfig = message.turnConfig;
+                        log('Received TURN configuration', 'success');
+                        break;
+                        
+                    case 'registered':
+                        log('Registered as sender', 'success');
+                        turnConfig = message.turnConfig;
+                        break;
+                        
+                    case 'peer-connected':
+                        if (message.peer === 'receiver') {
+                            log('Receiver connected! Creating offer...', 'success');
+                            await createOffer();
+                        }
+                        break;
+                        
+                    case 'answer':
+                        log('Received answer from receiver', 'info');
+                        await peerConnection.setRemoteDescription(new RTCSessionDescription({
+                            type: 'answer',
+                            sdp: message.sdp
+                        }));
+                        log('Remote description set', 'success');
+                        break;
+                        
+                    case 'ice-candidate':
+                        if (message.candidate) {
+                            log('Received ICE candidate from receiver', 'info');
+                            await peerConnection.addIceCandidate(new RTCIceCandidate(message.candidate));
+                        }
+                        break;
+                        
+                    case 'peer-disconnected':
+                        log('Receiver disconnected', 'error');
+                        updateStatus('webrtcStatus', 'disconnected', 'Disconnected');
+                        break;
+                        
+                    case 'error':
+                        log(`Server error: ${message.message}`, 'error');
+                        break;
+                }
+            };
+            
+            signalingSocket.onerror = (error) => {
+                log('WebSocket error', 'error');
+                updateStatus('signalingStatus', 'disconnected', 'Error');
+            };
+            
+            signalingSocket.onclose = () => {
+                log('Signaling connection closed', 'error');
+                updateStatus('signalingStatus', 'disconnected', 'Disconnected');
+                isConnected = false;
+            };
+            
+            document.getElementById('connectBtn').disabled = true;
+            document.getElementById('stopBtn').disabled = false;
+        }
+        
+        // Create WebRTC peer connection and offer
+        async function createOffer() {
+            try {
+                log('Creating peer connection...', 'info');
+                updateStatus('webrtcStatus', 'connecting', 'Connecting');
+                
+                // Create peer connection with TURN server
+                peerConnection = new RTCPeerConnection(turnConfig);
+                
+                // Add local stream to peer connection
+                localStream.getTracks().forEach(track => {
+                    peerConnection.addTrack(track, localStream);
+                    log(`Added ${track.kind} track`, 'info');
+                });
+                
+                // Handle ICE candidates
+                peerConnection.onicecandidate = (event) => {
+                    if (event.candidate) {
+                        log('Sending ICE candidate to receiver', 'info');
+                        signalingSocket.send(JSON.stringify({
+                            type: 'ice-candidate',
+                            candidate: event.candidate
+                        }));
+                    }
+                };
+                
+                // Handle connection state changes
+                peerConnection.onconnectionstatechange = () => {
+                    log(`Connection state: ${peerConnection.connectionState}`, 'info');
+                    
+                    switch(peerConnection.connectionState) {
+                        case 'connected':
+                            updateStatus('webrtcStatus', 'connected', 'Connected');
+                            log('WebRTC connection established!', 'success');
+                            isConnected = true;
+                            break;
+                        case 'disconnected':
+                        case 'failed':
+                            updateStatus('webrtcStatus', 'disconnected', 'Failed');
+                            log('Connection failed or disconnected', 'error');
+                            break;
+                        case 'closed':
+                            updateStatus('webrtcStatus', 'disconnected', 'Closed');
+                            break;
+                    }
+                };
+                
+                // Handle ICE connection state changes
+                peerConnection.oniceconnectionstatechange = () => {
+                    log(`ICE connection state: ${peerConnection.iceConnectionState}`, 'info');
+                };
+                
+                // Create and send offer
+                const offer = await peerConnection.createOffer();
+                await peerConnection.setLocalDescription(offer);
+                
+                log('Sending offer to receiver...', 'info');
+                signalingSocket.send(JSON.stringify({
+                    type: 'offer',
+                    sdp: offer.sdp
+                }));
+                
+            } catch (error) {
+                log(`Error creating offer: ${error.message}`, 'error');
+                updateStatus('webrtcStatus', 'disconnected', 'Error');
+            }
+        }
+        
+        // Stop streaming
+        function stopStreaming() {
+            log('Stopping streaming...', 'info');
+            
+            if (localStream) {
+                localStream.getTracks().forEach(track => track.stop());
+                localStream = null;
+            }
+            
+            if (peerConnection) {
+                peerConnection.close();
+                peerConnection = null;
+            }
+            
+            if (signalingSocket) {
+                signalingSocket.close();
+                signalingSocket = null;
+            }
+            
+            document.getElementById('localVideo').srcObject = null;
+            
+            updateStatus('signalingStatus', 'disconnected', 'Disconnected');
+            updateStatus('webrtcStatus', 'disconnected', 'Not Connected');
+            updateStatus('cameraStatus', 'disconnected', 'Not Started');
+            
+            document.getElementById('startBtn').disabled = false;
+            document.getElementById('connectBtn').disabled = true;
+            document.getElementById('stopBtn').disabled = true;
+            
+            log('Streaming stopped', 'success');
+        }
+        
+        // Initialize
+        log('Sender page loaded', 'success');
+        log(`Signaling server: ${SIGNALING_SERVER}`, 'info');
+    </script>
+</body>
+</html>

@@ -1,0 +1,587 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Video Receiver (Laptop)</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+            color: white;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        
+        h1 {
+            text-align: center;
+            margin-bottom: 30px;
+            font-size: 32px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.2);
+        }
+        
+        .main-grid {
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+        
+        .video-container {
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 15px;
+            padding: 20px;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        
+        video {
+            width: 100%;
+            border-radius: 10px;
+            background: black;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+            aspect-ratio: 16/9;
+        }
+        
+        .sidebar {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+        
+        .status-card, .metrics-card, .controls-card {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 15px;
+            padding: 20px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        
+        h3 {
+            margin-bottom: 15px;
+            font-size: 18px;
+            border-bottom: 2px solid rgba(255, 255, 255, 0.3);
+            padding-bottom: 10px;
+        }
+        
+        .status-item, .metric-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+            font-size: 14px;
+        }
+        
+        .status-label, .metric-label {
+            opacity: 0.9;
+        }
+        
+        .status-value {
+            font-weight: bold;
+            padding: 5px 12px;
+            border-radius: 20px;
+            background: rgba(255, 255, 255, 0.2);
+            font-size: 12px;
+        }
+        
+        .status-value.connected {
+            background: #10b981;
+        }
+        
+        .status-value.disconnected {
+            background: #ef4444;
+        }
+        
+        .status-value.connecting {
+            background: #f59e0b;
+        }
+        
+        .metric-value {
+            font-weight: bold;
+            font-family: monospace;
+            background: rgba(0, 0, 0, 0.3);
+            padding: 5px 12px;
+            border-radius: 8px;
+        }
+        
+        button {
+            width: 100%;
+            padding: 15px;
+            font-size: 16px;
+            font-weight: bold;
+            border: none;
+            border-radius: 10px;
+            cursor: pointer;
+            transition: all 0.3s;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 10px;
+        }
+        
+        button:active {
+            transform: scale(0.95);
+        }
+        
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        .btn-primary {
+            background: #10b981;
+            color: white;
+        }
+        
+        .btn-primary:hover:not(:disabled) {
+            background: #059669;
+        }
+        
+        .btn-danger {
+            background: #ef4444;
+            color: white;
+        }
+        
+        .btn-danger:hover:not(:disabled) {
+            background: #dc2626;
+        }
+        
+        .logs {
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 15px;
+            padding: 20px;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        
+        .logs h3 {
+            margin-bottom: 15px;
+        }
+        
+        .log-container {
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 10px;
+            padding: 15px;
+            max-height: 300px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 12px;
+        }
+        
+        .log-entry {
+            margin-bottom: 5px;
+            opacity: 0.9;
+        }
+        
+        .log-entry.error {
+            color: #fca5a5;
+        }
+        
+        .log-entry.success {
+            color: #86efac;
+        }
+        
+        .log-entry.info {
+            color: #bfdbfe;
+        }
+        
+        .waiting-message {
+            text-align: center;
+            padding: 50px;
+            font-size: 18px;
+            opacity: 0.7;
+        }
+        
+        @media (max-width: 968px) {
+            .main-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>💻 Video Receiver</h1>
+        
+        <div class="main-grid">
+            <div class="video-container">
+                <video id="remoteVideo" autoplay playsinline></video>
+                <div class="waiting-message" id="waitingMessage">
+                    Waiting for video stream from sender...
+                </div>
+            </div>
+            
+            <div class="sidebar">
+                <div class="status-card">
+                    <h3>Connection Status</h3>
+                    <div class="status-item">
+                        <span class="status-label">Signaling Server:</span>
+                        <span class="status-value disconnected" id="signalingStatus">Disconnected</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-label">Sender:</span>
+                        <span class="status-value disconnected" id="senderStatus">Not Connected</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-label">WebRTC:</span>
+                        <span class="status-value disconnected" id="webrtcStatus">Not Connected</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-label">Video Stream:</span>
+                        <span class="status-value disconnected" id="videoStatus">No Stream</span>
+                    </div>
+                </div>
+                
+                <div class="metrics-card">
+                    <h3>Stream Metrics</h3>
+                    <div class="metric-item">
+                        <span class="metric-label">Resolution:</span>
+                        <span class="metric-value" id="resolutionMetric">-</span>
+                    </div>
+                    <div class="metric-item">
+                        <span class="metric-label">Frame Rate:</span>
+                        <span class="metric-value" id="fpsMetric">- fps</span>
+                    </div>
+                    <div class="metric-item">
+                        <span class="metric-label">Bitrate:</span>
+                        <span class="metric-value" id="bitrateMetric">- kbps</span>
+                    </div>
+                    <div class="metric-item">
+                        <span class="metric-label">Packets Lost:</span>
+                        <span class="metric-value" id="packetsLostMetric">-</span>
+                    </div>
+                    <div class="metric-item">
+                        <span class="metric-label">Latency:</span>
+                        <span class="metric-value" id="latencyMetric">- ms</span>
+                    </div>
+                </div>
+                
+                <div class="controls-card">
+                    <h3>Controls</h3>
+                    <button class="btn-primary" id="connectBtn" onclick="connectSignaling()">Connect to Server</button>
+                    <button class="btn-danger" id="disconnectBtn" onclick="disconnect()" disabled>Disconnect</button>
+                </div>
+            </div>
+        </div>
+        
+        <div class="logs">
+            <h3>Activity Log</h3>
+            <div class="log-container" id="logs"></div>
+        </div>
+    </div>
+
+    <script>
+        // Configuration
+        const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const SIGNALING_SERVER = `${wsProtocol}//${window.location.hostname}:8080`;
+        
+        // Global variables
+        let peerConnection = null;
+        let signalingSocket = null;
+        let remoteStream = null;
+        let statsInterval = null;
+        let turnConfig = null;
+        
+        // Logging
+        function log(message, type = 'info') {
+            const logsDiv = document.getElementById('logs');
+            const entry = document.createElement('div');
+            entry.className = `log-entry ${type}`;
+            const timestamp = new Date().toLocaleTimeString();
+            entry.textContent = `[${timestamp}] ${message}`;
+            logsDiv.appendChild(entry);
+            logsDiv.scrollTop = logsDiv.scrollHeight;
+            console.log(`[${type.toUpperCase()}] ${message}`);
+        }
+        
+        function updateStatus(element, status, text) {
+            const statusEl = document.getElementById(element);
+            statusEl.className = `status-value ${status}`;
+            statusEl.textContent = text;
+        }
+        
+        // Connect to signaling server
+        function connectSignaling() {
+            log('Connecting to signaling server...', 'info');
+            updateStatus('signalingStatus', 'connecting', 'Connecting');
+            
+            signalingSocket = new WebSocket(SIGNALING_SERVER);
+            
+            signalingSocket.onopen = () => {
+                log('Connected to signaling server', 'success');
+                updateStatus('signalingStatus', 'connected', 'Connected');
+                
+                // Register as receiver
+                signalingSocket.send(JSON.stringify({
+                    type: 'register',
+                    role: 'receiver'
+                }));
+                
+                document.getElementById('connectBtn').disabled = true;
+                document.getElementById('disconnectBtn').disabled = false;
+            };
+            
+            signalingSocket.onmessage = async (event) => {
+                const message = JSON.parse(event.data);
+                log(`Received: ${message.type}`, 'info');
+                
+                switch(message.type) {
+                    case 'welcome':
+                        turnConfig = message.turnConfig;
+                        log('Received TURN configuration', 'success');
+                        break;
+                        
+                    case 'registered':
+                        log('Registered as receiver', 'success');
+                        turnConfig = message.turnConfig;
+                        break;
+                        
+                    case 'peer-connected':
+                        if (message.peer === 'sender') {
+                            log('Sender connected! Waiting for offer...', 'success');
+                            updateStatus('senderStatus', 'connected', 'Connected');
+                        }
+                        break;
+                        
+                    case 'offer':
+                        log('Received offer from sender', 'info');
+                        await handleOffer(message.sdp);
+                        break;
+                        
+                    case 'ice-candidate':
+                        if (message.candidate && peerConnection) {
+                            log('Received ICE candidate from sender', 'info');
+                            await peerConnection.addIceCandidate(new RTCIceCandidate(message.candidate));
+                        }
+                        break;
+                        
+                    case 'peer-disconnected':
+                        if (message.peer === 'sender') {
+                            log('Sender disconnected', 'error');
+                            updateStatus('senderStatus', 'disconnected', 'Disconnected');
+                            updateStatus('webrtcStatus', 'disconnected', 'Disconnected');
+                            updateStatus('videoStatus', 'disconnected', 'No Stream');
+                            document.getElementById('waitingMessage').style.display = 'block';
+                            if (statsInterval) {
+                                clearInterval(statsInterval);
+                            }
+                        }
+                        break;
+                        
+                    case 'error':
+                        log(`Server error: ${message.message}`, 'error');
+                        break;
+                }
+            };
+            
+            signalingSocket.onerror = (error) => {
+                log('WebSocket error', 'error');
+                updateStatus('signalingStatus', 'disconnected', 'Error');
+            };
+            
+            signalingSocket.onclose = () => {
+                log('Signaling connection closed', 'error');
+                updateStatus('signalingStatus', 'disconnected', 'Disconnected');
+                document.getElementById('connectBtn').disabled = false;
+                document.getElementById('disconnectBtn').disabled = true;
+            };
+        }
+        
+        // Handle incoming offer from sender
+        async function handleOffer(sdp) {
+            try {
+                log('Creating peer connection...', 'info');
+                updateStatus('webrtcStatus', 'connecting', 'Connecting');
+                
+                // Create peer connection with TURN server
+                peerConnection = new RTCPeerConnection(turnConfig);
+                
+                // Handle incoming tracks
+                peerConnection.ontrack = (event) => {
+                    log('Received remote track', 'success');
+                    remoteStream = event.streams[0];
+                    document.getElementById('remoteVideo').srcObject = remoteStream;
+                    document.getElementById('waitingMessage').style.display = 'none';
+                    updateStatus('videoStatus', 'connected', 'Receiving');
+                    
+                    // Start collecting metrics
+                    startMetricsCollection();
+                };
+                
+                // Handle ICE candidates
+                peerConnection.onicecandidate = (event) => {
+                    if (event.candidate) {
+                        log('Sending ICE candidate to sender', 'info');
+                        signalingSocket.send(JSON.stringify({
+                            type: 'ice-candidate',
+                            candidate: event.candidate
+                        }));
+                    }
+                };
+                
+                // Handle connection state changes
+                peerConnection.onconnectionstatechange = () => {
+                    log(`Connection state: ${peerConnection.connectionState}`, 'info');
+                    
+                    switch(peerConnection.connectionState) {
+                        case 'connected':
+                            updateStatus('webrtcStatus', 'connected', 'Connected');
+                            log('WebRTC connection established!', 'success');
+                            break;
+                        case 'disconnected':
+                        case 'failed':
+                            updateStatus('webrtcStatus', 'disconnected', 'Failed');
+                            updateStatus('videoStatus', 'disconnected', 'No Stream');
+                            log('Connection failed or disconnected', 'error');
+                            if (statsInterval) {
+                                clearInterval(statsInterval);
+                            }
+                            break;
+                        case 'closed':
+                            updateStatus('webrtcStatus', 'disconnected', 'Closed');
+                            updateStatus('videoStatus', 'disconnected', 'No Stream');
+                            break;
+                    }
+                };
+                
+                // Handle ICE connection state changes
+                peerConnection.oniceconnectionstatechange = () => {
+                    log(`ICE connection state: ${peerConnection.iceConnectionState}`, 'info');
+                };
+                
+                // Set remote description (offer)
+                await peerConnection.setRemoteDescription(new RTCSessionDescription({
+                    type: 'offer',
+                    sdp: sdp
+                }));
+                
+                // Create and send answer
+                const answer = await peerConnection.createAnswer();
+                await peerConnection.setLocalDescription(answer);
+                
+                log('Sending answer to sender...', 'info');
+                signalingSocket.send(JSON.stringify({
+                    type: 'answer',
+                    sdp: answer.sdp
+                }));
+                
+            } catch (error) {
+                log(`Error handling offer: ${error.message}`, 'error');
+                updateStatus('webrtcStatus', 'disconnected', 'Error');
+            }
+        }
+        
+        // Start collecting and displaying metrics
+        function startMetricsCollection() {
+            if (statsInterval) {
+                clearInterval(statsInterval);
+            }
+            
+            statsInterval = setInterval(async () => {
+                if (!peerConnection) return;
+                
+                try {
+                    const stats = await peerConnection.getStats();
+                    let inboundRtpStats = null;
+                    
+                    stats.forEach(report => {
+                        if (report.type === 'inbound-rtp' && report.kind === 'video') {
+                            inboundRtpStats = report;
+                        }
+                    });
+                    
+                    if (inboundRtpStats) {
+                        // Resolution
+                        if (inboundRtpStats.frameWidth && inboundRtpStats.frameHeight) {
+                            document.getElementById('resolutionMetric').textContent = 
+                                `${inboundRtpStats.frameWidth}x${inboundRtpStats.frameHeight}`;
+                        }
+                        
+                        // Frame rate
+                        if (inboundRtpStats.framesPerSecond) {
+                            document.getElementById('fpsMetric').textContent = 
+                                `${Math.round(inboundRtpStats.framesPerSecond)} fps`;
+                        }
+                        
+                        // Bitrate (calculate from bytes received)
+                        if (inboundRtpStats.bytesReceived !== undefined) {
+                            const bitrate = Math.round((inboundRtpStats.bytesReceived * 8) / 1000);
+                            document.getElementById('bitrateMetric').textContent = 
+                                `${bitrate} kbps`;
+                        }
+                        
+                        // Packets lost
+                        if (inboundRtpStats.packetsLost !== undefined) {
+                            document.getElementById('packetsLostMetric').textContent = 
+                                inboundRtpStats.packetsLost;
+                        }
+                        
+                        // Jitter (as proxy for latency)
+                        if (inboundRtpStats.jitter !== undefined) {
+                            document.getElementById('latencyMetric').textContent = 
+                                `${Math.round(inboundRtpStats.jitter * 1000)} ms`;
+                        }
+                    }
+                } catch (error) {
+                    console.error('Error collecting stats:', error);
+                }
+            }, 1000);
+        }
+        
+        // Disconnect
+        function disconnect() {
+            log('Disconnecting...', 'info');
+            
+            if (statsInterval) {
+                clearInterval(statsInterval);
+                statsInterval = null;
+            }
+            
+            if (peerConnection) {
+                peerConnection.close();
+                peerConnection = null;
+            }
+            
+            if (signalingSocket) {
+                signalingSocket.close();
+                signalingSocket = null;
+            }
+            
+            document.getElementById('remoteVideo').srcObject = null;
+            document.getElementById('waitingMessage').style.display = 'block';
+            
+            updateStatus('signalingStatus', 'disconnected', 'Disconnected');
+            updateStatus('senderStatus', 'disconnected', 'Not Connected');
+            updateStatus('webrtcStatus', 'disconnected', 'Not Connected');
+            updateStatus('videoStatus', 'disconnected', 'No Stream');
+            
+            // Reset metrics
+            document.getElementById('resolutionMetric').textContent = '-';
+            document.getElementById('fpsMetric').textContent = '- fps';
+            document.getElementById('bitrateMetric').textContent = '- kbps';
+            document.getElementById('packetsLostMetric').textContent = '-';
+            document.getElementById('latencyMetric').textContent = '- ms';
+            
+            document.getElementById('connectBtn').disabled = false;
+            document.getElementById('disconnectBtn').disabled = true;
+            
+            log('Disconnected', 'success');
+        }
+        
+        // Initialize
+        log('Receiver page loaded', 'success');
+        log(`Signaling server: ${SIGNALING_SERVER}`, 'info');
+    </script>
+</body>
+</html>
