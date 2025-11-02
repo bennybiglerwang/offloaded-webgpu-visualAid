@@ -4,6 +4,13 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Video Receiver (Laptop)</title>
+    <script type="module">
+        // Import Transformers.js
+        import { pipeline, env } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2';
+
+        // Make it available globally
+        window.transformers = { pipeline, env };
+    </script>
     <style>
         * {
             margin: 0;
@@ -217,6 +224,7 @@
         <div class="main-grid">
             <div class="video-container">
                 <video id="remoteVideo" autoplay playsinline></video>
+                <canvas id="frameCanvas" style="display:none;"></canvas>
                 <div class="waiting-message" id="waitingMessage">
                     Waiting for video stream from sender...
                 </div>
@@ -240,6 +248,14 @@
                     <div class="status-item">
                         <span class="status-label">Video Stream:</span>
                         <span class="status-value disconnected" id="videoStatus">No Stream</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-label">WebGPU:</span>
+                        <span class="status-value disconnected" id="webgpuStatus">Not Initialized</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-label">AI Model:</span>
+                        <span class="status-value disconnected" id="modelStatus">Not Loaded</span>
                     </div>
                 </div>
                 
@@ -271,6 +287,9 @@
                     <h3>Controls</h3>
                     <button class="btn-primary" id="connectBtn" onclick="connectSignaling()">Connect to Server</button>
                     <button class="btn-danger" id="disconnectBtn" onclick="disconnect()" disabled>Disconnect</button>
+                    <button class="btn-primary" id="testBtn" onclick="testDataChannel()" disabled>Test Description</button>
+                    <button class="btn-primary" id="startInferenceBtn" onclick="startInference()" disabled>Start AI Analysis</button>
+                    <button class="btn-danger" id="stopInferenceBtn" onclick="stopInference()" disabled>Stop AI Analysis</button>
                 </div>
             </div>
         </div>
@@ -292,6 +311,17 @@
         let remoteStream = null;
         let statsInterval = null;
         let turnConfig = null;
+        let dataChannel = null;
+
+        // WebGPU and AI variables
+        let webgpuDevice = null;
+        let webgpuAdapter = null;
+        let canvas = null;
+        let canvasContext = null;
+        let imageCapture = null;
+        let visionModel = null;
+        let processingFrame = false;
+        let inferenceInterval = null;
         
         // Logging
         function log(message, type = 'info') {
@@ -310,7 +340,158 @@
             statusEl.className = `status-value ${status}`;
             statusEl.textContent = text;
         }
-        
+
+        // Initialize WebGPU
+        async function initializeWebGPU() {
+            try {
+                log('Initializing WebGPU...', 'info');
+                updateStatus('webgpuStatus', 'connecting', 'Initializing');
+
+                if (!navigator.gpu) {
+                    throw new Error('WebGPU not supported in this browser');
+                }
+
+                webgpuAdapter = await navigator.gpu.requestAdapter();
+                if (!webgpuAdapter) {
+                    throw new Error('No WebGPU adapter found');
+                }
+
+                webgpuDevice = await webgpuAdapter.requestDevice();
+
+                log('WebGPU initialized successfully', 'success');
+                updateStatus('webgpuStatus', 'connected', 'Ready');
+
+                // Initialize canvas for frame extraction
+                canvas = document.getElementById('frameCanvas');
+                canvasContext = canvas.getContext('2d', { willReadFrequently: true });
+
+                return true;
+            } catch (error) {
+                log(`WebGPU initialization failed: ${error.message}`, 'error');
+                updateStatus('webgpuStatus', 'disconnected', 'Not Available');
+                return false;
+            }
+        }
+
+        // Initialize AI Model (using Transformers.js)
+        async function initializeModel() {
+            try {
+                log('Loading AI model (this may take a few minutes)...', 'info');
+                updateStatus('modelStatus', 'connecting', 'Loading');
+
+                // Wait for transformers to be available
+                while (!window.transformers) {
+                    await new Promise(resolve => setTimeout(resolve, 100));
+                }
+
+                const { pipeline, env } = window.transformers;
+
+                // Use WebGPU backend if available
+                env.backends.onnx.wasm.numThreads = 1;
+
+                // Load image-to-text model (BLIP or similar)
+                // Note: For FastVLM, you would use a different model
+                // Using ViT-GPT2 as a lighter alternative for testing
+                log('Downloading model weights...', 'info');
+                visionModel = await pipeline('image-to-text', 'Xenova/vit-gpt2-image-captioning');
+
+                log('AI model loaded successfully', 'success');
+                updateStatus('modelStatus', 'connected', 'Ready');
+
+                // Enable inference button
+                document.getElementById('startInferenceBtn').disabled = false;
+
+                return true;
+            } catch (error) {
+                log(`Model loading failed: ${error.message}`, 'error');
+                updateStatus('modelStatus', 'disconnected', 'Failed');
+                return false;
+            }
+        }
+
+        // Capture frame from video
+        function captureFrame() {
+            const video = document.getElementById('remoteVideo');
+
+            if (!video || video.readyState !== video.HAVE_ENOUGH_DATA) {
+                return null;
+            }
+
+            // Set canvas size to match video
+            canvas.width = video.videoWidth || 640;
+            canvas.height = video.videoHeight || 480;
+
+            // Draw current video frame to canvas
+            canvasContext.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+            // Return canvas as ImageData
+            return canvas;
+        }
+
+        // Process frame with AI model
+        async function processFrame() {
+            if (processingFrame || !visionModel) {
+                return;
+            }
+
+            processingFrame = true;
+
+            try {
+                const frame = captureFrame();
+                if (!frame) {
+                    processingFrame = false;
+                    return;
+                }
+
+                log('Processing frame with AI...', 'info');
+
+                // Run inference
+                const result = await visionModel(frame.toDataURL('image/jpeg'));
+
+                if (result && result.length > 0) {
+                    const description = result[0].generated_text;
+                    log(`Generated description: ${description}`, 'success');
+
+                    // Send description through data channel
+                    sendDescription(description);
+                }
+
+            } catch (error) {
+                log(`Frame processing error: ${error.message}`, 'error');
+            } finally {
+                processingFrame = false;
+            }
+        }
+
+        // Start continuous inference
+        function startInference() {
+            if (inferenceInterval) {
+                clearInterval(inferenceInterval);
+            }
+
+            // Process a frame every 3 seconds (adjust as needed)
+            inferenceInterval = setInterval(() => {
+                processFrame();
+            }, 3000);
+
+            document.getElementById('startInferenceBtn').disabled = true;
+            document.getElementById('stopInferenceBtn').disabled = false;
+
+            log('Started continuous inference (1 frame every 3 seconds)', 'success');
+        }
+
+        // Stop continuous inference
+        function stopInference() {
+            if (inferenceInterval) {
+                clearInterval(inferenceInterval);
+                inferenceInterval = null;
+                log('Stopped continuous inference', 'info');
+            }
+
+            document.getElementById('startInferenceBtn').disabled = false;
+            document.getElementById('stopInferenceBtn').disabled = true;
+        }
+
         // Connect to signaling server
         function connectSignaling() {
             log('Connecting to signaling server...', 'info');
@@ -397,7 +578,38 @@
                 document.getElementById('disconnectBtn').disabled = true;
             };
         }
-        
+
+        // Send description through data channel
+        function sendDescription(text) {
+            if (dataChannel && dataChannel.readyState === 'open') {
+                const message = JSON.stringify({
+                    type: 'description',
+                    text: text,
+                    timestamp: Date.now()
+                });
+                dataChannel.send(message);
+                log(`Sent description: ${text.substring(0, 50)}...`, 'success');
+                return true;
+            } else {
+                log('Data channel not ready', 'error');
+                return false;
+            }
+        }
+
+        // Test data channel with a sample description
+        function testDataChannel() {
+            const testDescriptions = [
+                'A person is standing in a bright room with natural lighting from a window.',
+                'I can see a computer screen displaying code in a dark theme editor.',
+                'There appears to be a wooden desk with various objects on it.',
+                'The scene shows an indoor environment with furniture visible in the background.',
+                'A mobile device is being held up, showing the camera view.'
+            ];
+
+            const randomDesc = testDescriptions[Math.floor(Math.random() * testDescriptions.length)];
+            sendDescription(randomDesc);
+        }
+
         // Handle incoming offer from sender
         async function handleOffer(sdp) {
             try {
@@ -406,17 +618,56 @@
                 
                 // Create peer connection with TURN server
                 peerConnection = new RTCPeerConnection(turnConfig);
-                
+
+                // Handle data channel from sender
+                peerConnection.ondatachannel = (event) => {
+                    dataChannel = event.channel;
+                    log('Data channel received', 'success');
+
+                    dataChannel.onopen = () => {
+                        log('Data channel opened - ready to send descriptions', 'success');
+                        document.getElementById('testBtn').disabled = false;
+                    };
+
+                    dataChannel.onclose = () => {
+                        log('Data channel closed', 'info');
+                        document.getElementById('testBtn').disabled = true;
+                    };
+
+                    dataChannel.onerror = (error) => {
+                        log('Data channel error: ' + error, 'error');
+                    };
+
+                    dataChannel.onmessage = (event) => {
+                        log('Received message from sender: ' + event.data, 'info');
+                    };
+                };
+
                 // Handle incoming tracks
-                peerConnection.ontrack = (event) => {
+                peerConnection.ontrack = async (event) => {
                     log('Received remote track', 'success');
                     remoteStream = event.streams[0];
                     document.getElementById('remoteVideo').srcObject = remoteStream;
                     document.getElementById('waitingMessage').style.display = 'none';
                     updateStatus('videoStatus', 'connected', 'Receiving');
-                    
+
                     // Start collecting metrics
                     startMetricsCollection();
+
+                    // Initialize WebGPU and AI model
+                    const webgpuReady = await initializeWebGPU();
+                    if (webgpuReady) {
+                        const modelReady = await initializeModel();
+                        if (modelReady) {
+                            // Start automatic inference when video is playing
+                            const video = document.getElementById('remoteVideo');
+                            video.addEventListener('playing', () => {
+                                setTimeout(() => {
+                                    startInference();
+                                }, 2000); // Wait 2 seconds for video to stabilize
+                            }, { once: true });
+                        }
+                    }
                 };
                 
                 // Handle ICE candidates
@@ -542,17 +793,25 @@
         // Disconnect
         function disconnect() {
             log('Disconnecting...', 'info');
-            
+
+            // Stop inference
+            stopInference();
+
+            if (dataChannel) {
+                dataChannel.close();
+                dataChannel = null;
+            }
+
             if (statsInterval) {
                 clearInterval(statsInterval);
                 statsInterval = null;
             }
-            
+
             if (peerConnection) {
                 peerConnection.close();
                 peerConnection = null;
             }
-            
+
             if (signalingSocket) {
                 signalingSocket.close();
                 signalingSocket = null;

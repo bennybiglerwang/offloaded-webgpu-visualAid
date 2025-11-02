@@ -183,12 +183,169 @@
         .log-entry.info {
             color: #bfdbfe;
         }
+
+        .description-card {
+            background: rgba(255, 255, 255, 0.15);
+            backdrop-filter: blur(10px);
+            border-radius: 15px;
+            padding: 20px;
+            margin-bottom: 20px;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            min-height: 120px;
+        }
+
+        .description-card h3 {
+            margin-bottom: 15px;
+            font-size: 18px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .description-text {
+            font-size: 18px;
+            line-height: 1.6;
+            padding: 15px;
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 10px;
+            min-height: 60px;
+            font-weight: 500;
+        }
+
+        .description-text.empty {
+            opacity: 0.5;
+            font-style: italic;
+        }
+
+        .tts-controls {
+            display: flex;
+            gap: 10px;
+            margin-top: 10px;
+        }
+
+        .tts-controls button {
+            flex: 1;
+            padding: 10px;
+            font-size: 14px;
+        }
+
+        .status-indicator {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #ef4444;
+            animation: pulse 2s infinite;
+        }
+
+        .status-indicator.active {
+            background: #10b981;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        /* Accessibility enhancements */
+        .accessibility-controls {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 15px;
+            padding: 20px;
+            margin-bottom: 20px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .accessibility-controls h3 {
+            margin-bottom: 15px;
+            font-size: 18px;
+        }
+
+        .toggle-switch {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+            padding: 10px;
+        }
+
+        /* High contrast mode */
+        body.high-contrast {
+            background: #000000;
+        }
+
+        body.high-contrast .status-card,
+        body.high-contrast .settings,
+        body.high-contrast .description-card,
+        body.high-contrast .accessibility-controls {
+            background: #1a1a1a;
+            border: 2px solid #ffffff;
+        }
+
+        body.high-contrast .description-text {
+            background: #000000;
+            color: #ffffff;
+            font-size: 22px;
+        }
+
+        body.high-contrast button {
+            border: 2px solid #ffffff;
+        }
+
+        /* Large text mode */
+        body.large-text {
+            font-size: 18px;
+        }
+
+        body.large-text .description-text {
+            font-size: 24px;
+        }
+
+        body.large-text button {
+            font-size: 20px;
+            padding: 20px 35px;
+        }
+
+        body.large-text h1 {
+            font-size: 36px;
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <h1>📱 Video Sender</h1>
-        
+
+        <div class="accessibility-controls">
+            <h3>♿ Accessibility</h3>
+            <div class="toggle-switch">
+                <label>High Contrast Mode:</label>
+                <button class="btn-primary" onclick="toggleHighContrast()" style="flex: 0 0 auto; padding: 10px 20px;">Toggle</button>
+            </div>
+            <div class="toggle-switch">
+                <label>Large Text Mode:</label>
+                <button class="btn-primary" onclick="toggleLargeText()" style="flex: 0 0 auto; padding: 10px 20px;">Toggle</button>
+            </div>
+            <div class="toggle-switch">
+                <label>Keep Screen Awake:</label>
+                <button class="btn-primary" id="wakeLockBtn" onclick="toggleWakeLock()" style="flex: 0 0 auto; padding: 10px 20px;">Enable</button>
+            </div>
+        </div>
+
+        <div class="description-card">
+            <h3>
+                <span>Scene Description</span>
+                <span class="status-indicator" id="descriptionIndicator"></span>
+            </h3>
+            <div class="description-text empty" id="descriptionText">
+                Waiting for visual descriptions...
+            </div>
+            <div class="tts-controls">
+                <button class="btn-primary" id="repeatBtn" onclick="repeatDescription()" disabled>🔊 Repeat</button>
+                <button class="btn-primary" id="toggleTTSBtn" onclick="toggleTTS()">🔊 TTS: ON</button>
+            </div>
+        </div>
+
         <div class="status-card">
             <div class="status-item">
                 <span class="status-label">Signaling Server:</span>
@@ -252,9 +409,20 @@
         let peerConnection = null;
         let signalingSocket = null;
         let isConnected = false;
-        
+        let dataChannel = null;
+
         // TURN configuration (will be received from server)
         let turnConfig = null;
+
+        // Text-to-Speech variables
+        let ttsEnabled = true;
+        let lastDescription = '';
+        let speechSynthesis = window.speechSynthesis;
+
+        // Accessibility variables
+        let wakeLock = null;
+        let highContrastMode = false;
+        let largeTextMode = false;
         
         // Logging
         function log(message, type = 'info') {
@@ -430,7 +598,142 @@
             document.getElementById('connectBtn').disabled = true;
             document.getElementById('stopBtn').disabled = false;
         }
-        
+
+        // Text-to-Speech functions
+        function speakText(text) {
+            if (!ttsEnabled || !text) return;
+
+            // Cancel any ongoing speech
+            speechSynthesis.cancel();
+
+            const utterance = new SpeechSynthesisUtterance(text);
+            utterance.lang = 'en-US';
+            utterance.rate = 0.9; // Slightly slower for clarity
+            utterance.pitch = 1.0;
+            utterance.volume = 1.0;
+
+            utterance.onstart = () => {
+                log('Speaking description...', 'info');
+            };
+
+            utterance.onend = () => {
+                log('Finished speaking', 'info');
+            };
+
+            utterance.onerror = (event) => {
+                log(`Speech error: ${event.error}`, 'error');
+            };
+
+            speechSynthesis.speak(utterance);
+        }
+
+        function toggleTTS() {
+            ttsEnabled = !ttsEnabled;
+            const btn = document.getElementById('toggleTTSBtn');
+            btn.textContent = ttsEnabled ? '🔊 TTS: ON' : '🔇 TTS: OFF';
+            log(`Text-to-speech ${ttsEnabled ? 'enabled' : 'disabled'}`, 'info');
+        }
+
+        function repeatDescription() {
+            if (lastDescription) {
+                speakText(lastDescription);
+            }
+        }
+
+        function handleIncomingDescription(description) {
+            lastDescription = description;
+
+            // Update UI
+            const descTextEl = document.getElementById('descriptionText');
+            const indicatorEl = document.getElementById('descriptionIndicator');
+
+            descTextEl.textContent = description;
+            descTextEl.classList.remove('empty');
+            indicatorEl.classList.add('active');
+
+            // Enable repeat button
+            document.getElementById('repeatBtn').disabled = false;
+
+            // Speak the description
+            speakText(description);
+
+            // Haptic feedback if available
+            if (navigator.vibrate) {
+                navigator.vibrate([100, 50, 100]);
+            }
+
+            log('Received description: ' + description, 'success');
+
+            // Remove active indicator after 2 seconds
+            setTimeout(() => {
+                indicatorEl.classList.remove('active');
+            }, 2000);
+        }
+
+        // Accessibility functions
+        function toggleHighContrast() {
+            highContrastMode = !highContrastMode;
+            document.body.classList.toggle('high-contrast', highContrastMode);
+            log(`High contrast mode ${highContrastMode ? 'enabled' : 'disabled'}`, 'info');
+
+            // Save preference
+            localStorage.setItem('highContrast', highContrastMode);
+        }
+
+        function toggleLargeText() {
+            largeTextMode = !largeTextMode;
+            document.body.classList.toggle('large-text', largeTextMode);
+            log(`Large text mode ${largeTextMode ? 'enabled' : 'disabled'}`, 'info');
+
+            // Save preference
+            localStorage.setItem('largeText', largeTextMode);
+        }
+
+        async function toggleWakeLock() {
+            try {
+                if (!('wakeLock' in navigator)) {
+                    alert('Screen Wake Lock API is not supported on this device.');
+                    log('Wake Lock not supported', 'error');
+                    return;
+                }
+
+                if (wakeLock !== null) {
+                    // Release wake lock
+                    await wakeLock.release();
+                    wakeLock = null;
+                    document.getElementById('wakeLockBtn').textContent = 'Enable';
+                    log('Screen wake lock released', 'info');
+                } else {
+                    // Request wake lock
+                    wakeLock = await navigator.wakeLock.request('screen');
+                    document.getElementById('wakeLockBtn').textContent = 'Disable';
+                    log('Screen wake lock enabled', 'success');
+
+                    wakeLock.addEventListener('release', () => {
+                        log('Wake lock was released', 'info');
+                    });
+                }
+            } catch (err) {
+                log(`Wake lock error: ${err.message}`, 'error');
+            }
+        }
+
+        // Load saved accessibility preferences
+        function loadAccessibilityPreferences() {
+            const savedHighContrast = localStorage.getItem('highContrast') === 'true';
+            const savedLargeText = localStorage.getItem('largeText') === 'true';
+
+            if (savedHighContrast) {
+                highContrastMode = true;
+                document.body.classList.add('high-contrast');
+            }
+
+            if (savedLargeText) {
+                largeTextMode = true;
+                document.body.classList.add('large-text');
+            }
+        }
+
         // Create WebRTC peer connection and offer
         async function createOffer() {
             try {
@@ -439,13 +742,42 @@
                 
                 // Create peer connection with TURN server
                 peerConnection = new RTCPeerConnection(turnConfig);
-                
+
+                // Create data channel for receiving descriptions
+                // Note: Sender creates the channel, receiver will receive it in 'ondatachannel' event
+                dataChannel = peerConnection.createDataChannel('descriptions');
+
+                dataChannel.onopen = () => {
+                    log('Data channel opened', 'success');
+                };
+
+                dataChannel.onclose = () => {
+                    log('Data channel closed', 'info');
+                };
+
+                dataChannel.onerror = (error) => {
+                    log('Data channel error: ' + error, 'error');
+                };
+
+                dataChannel.onmessage = (event) => {
+                    log('Received message via data channel', 'info');
+                    try {
+                        const message = JSON.parse(event.data);
+                        if (message.type === 'description') {
+                            handleIncomingDescription(message.text);
+                        }
+                    } catch (e) {
+                        // Handle plain text messages
+                        handleIncomingDescription(event.data);
+                    }
+                };
+
                 // Add local stream to peer connection
                 localStream.getTracks().forEach(track => {
                     peerConnection.addTrack(track, localStream);
                     log(`Added ${track.kind} track`, 'info');
                 });
-                
+
                 // Handle ICE candidates
                 peerConnection.onicecandidate = (event) => {
                     if (event.candidate) {
@@ -502,17 +834,27 @@
         // Stop streaming
         function stopStreaming() {
             log('Stopping streaming...', 'info');
-            
+
+            // Cancel any ongoing speech
+            if (speechSynthesis) {
+                speechSynthesis.cancel();
+            }
+
+            if (dataChannel) {
+                dataChannel.close();
+                dataChannel = null;
+            }
+
             if (localStream) {
                 localStream.getTracks().forEach(track => track.stop());
                 localStream = null;
             }
-            
+
             if (peerConnection) {
                 peerConnection.close();
                 peerConnection = null;
             }
-            
+
             if (signalingSocket) {
                 signalingSocket.close();
                 signalingSocket = null;
@@ -534,6 +876,9 @@
         // Initialize
         log('Sender page loaded', 'success');
         log(`Signaling server: ${SIGNALING_SERVER}`, 'info');
+
+        // Load accessibility preferences on startup
+        loadAccessibilityPreferences();
     </script>
 </body>
 </html>
