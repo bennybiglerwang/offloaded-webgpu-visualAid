@@ -5,11 +5,17 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Video Receiver (Laptop)</title>
     <script type="module">
-        // Import Transformers.js
-        import { pipeline, env } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2';
+        // Import Transformers.js (current official package)
+        import {
+            AutoProcessor,
+            AutoModelForImageTextToText,
+            RawImage,
+            TextStreamer,
+            env
+        } from 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.7.6';
 
         // Make it available globally
-        window.transformers = { pipeline, env };
+        window.transformers = { AutoProcessor, AutoModelForImageTextToText, RawImage, TextStreamer, env };
     </script>
     <style>
         * {
@@ -320,6 +326,7 @@
         let canvasContext = null;
         let imageCapture = null;
         let visionModel = null;
+        let visionProcessor = null; // AutoProcessor for FastVLM
         let processingFrame = false;
         let inferenceInterval = null;
         
@@ -373,10 +380,10 @@
             }
         }
 
-        // Initialize AI Model (using Transformers.js)
+        // Initialize AI Model (FastVLM-0.5B-ONNX)
         async function initializeModel() {
             try {
-                log('Loading AI model (this may take a few minutes)...', 'info');
+                log('Loading FastVLM model (this may take a few minutes)...', 'info');
                 updateStatus('modelStatus', 'connecting', 'Loading');
 
                 // Wait for transformers to be available
@@ -384,18 +391,49 @@
                     await new Promise(resolve => setTimeout(resolve, 100));
                 }
 
-                const { pipeline, env } = window.transformers;
+                const { AutoProcessor, AutoModelForImageTextToText, env } = window.transformers;
 
-                // Use WebGPU backend if available
-                env.backends.onnx.wasm.numThreads = 1;
+                // Configure backend preferences
+                env.allowLocalModels = false; // Use CDN models
+                env.allowRemoteModels = true;
 
-                // Load image-to-text model (BLIP or similar)
-                // Note: For FastVLM, you would use a different model
-                // Using ViT-GPT2 as a lighter alternative for testing
-                log('Downloading model weights...', 'info');
-                visionModel = await pipeline('image-to-text', 'Xenova/vit-gpt2-image-captioning');
+                const model_id = 'onnx-community/FastVLM-0.5B-ONNX';
 
-                log('AI model loaded successfully', 'success');
+                // Load processor
+                log('Loading FastVLM processor...', 'info');
+                visionProcessor = await AutoProcessor.from_pretrained(model_id, {
+                    progress_callback: (progress) => {
+                        if (progress.status === 'downloading') {
+                            const percent = Math.round((progress.loaded / progress.total) * 100);
+                            log(`Downloading processor: ${percent}% (${Math.round(progress.loaded / 1024 / 1024)}MB / ${Math.round(progress.total / 1024 / 1024)}MB)`, 'info');
+                        }
+                    }
+                });
+
+                // Load model with quantization config
+                log('Loading FastVLM model (120-160MB, quantized)...', 'info');
+                visionModel = await AutoModelForImageTextToText.from_pretrained(model_id, {
+                    dtype: {
+                        embed_tokens: 'fp16',           // Moderate precision for text embeddings
+                        vision_encoder: 'q4',           // Aggressive 4-bit for vision
+                        decoder_model_merged: 'q4',     // 4-bit for language model
+                    },
+                    device: 'webgpu',                   // Prefer WebGPU
+                    progress_callback: (progress) => {
+                        if (progress.status === 'downloading') {
+                            const percent = Math.round((progress.loaded / progress.total) * 100);
+                            const loadedMB = Math.round(progress.loaded / 1024 / 1024);
+                            const totalMB = Math.round(progress.total / 1024 / 1024);
+                            log(`Downloading ${progress.file}: ${percent}% (${loadedMB}MB / ${totalMB}MB)`, 'info');
+                            updateStatus('modelStatus', 'connecting', `Loading ${percent}%`);
+                        } else if (progress.status === 'ready') {
+                            log(`${progress.file} ready`, 'info');
+                        }
+                    }
+                });
+
+                log('FastVLM model loaded successfully', 'success');
+                log('Model quantization: fp16 (embeddings) + q4 (vision + decoder)', 'info');
                 updateStatus('modelStatus', 'connected', 'Ready');
 
                 // Enable inference button
@@ -404,12 +442,20 @@
                 return true;
             } catch (error) {
                 log(`Model loading failed: ${error.message}`, 'error');
+                log('Error stack: ' + error.stack, 'error');
                 updateStatus('modelStatus', 'disconnected', 'Failed');
+
+                // Check for specific errors
+                if (error.message.includes('WebGPU')) {
+                    log('WebGPU not available, falling back to WASM...', 'info');
+                    // Could retry with device: 'wasm' here
+                }
+
                 return false;
             }
         }
 
-        // Capture frame from video
+        // Capture frame from video and create RawImage
         function captureFrame() {
             const video = document.getElementById('remoteVideo');
 
@@ -418,19 +464,27 @@
             }
 
             // Set canvas size to match video
-            canvas.width = video.videoWidth || 640;
-            canvas.height = video.videoHeight || 480;
+            const width = video.videoWidth || 640;
+            const height = video.videoHeight || 480;
+            canvas.width = width;
+            canvas.height = height;
 
             // Draw current video frame to canvas
-            canvasContext.drawImage(video, 0, 0, canvas.width, canvas.height);
+            canvasContext.drawImage(video, 0, 0, width, height);
 
-            // Return canvas as ImageData
-            return canvas;
+            // Get ImageData from canvas
+            const imageData = canvasContext.getImageData(0, 0, width, height);
+
+            // Create RawImage for FastVLM (more efficient than toDataURL)
+            const { RawImage } = window.transformers;
+            const rawImage = new RawImage(imageData.data, width, height, 4); // 4 channels (RGBA)
+
+            return rawImage;
         }
 
-        // Process frame with AI model
+        // Process frame with FastVLM
         async function processFrame() {
-            if (processingFrame || !visionModel) {
+            if (processingFrame || !visionModel || !visionProcessor) {
                 return;
             }
 
@@ -443,21 +497,56 @@
                     return;
                 }
 
-                log('Processing frame with AI...', 'info');
+                log('Processing frame with FastVLM...', 'info');
 
-                // Run inference
-                const result = await visionModel(frame.toDataURL('image/jpeg'));
+                // Prepare chat messages for FastVLM
+                const messages = [
+                    {
+                        role: 'user',
+                        content: '<image>Describe this image in detail for a visually impaired person. Include objects, people, actions, colors, and spatial relationships.'
+                    }
+                ];
 
-                if (result && result.length > 0) {
-                    const description = result[0].generated_text;
+                // Apply chat template
+                const prompt = visionProcessor.apply_chat_template(messages, {
+                    add_generation_prompt: true
+                });
+
+                // Process image + prompt together
+                const inputs = await visionProcessor(frame, prompt, {
+                    add_special_tokens: false
+                });
+
+                log('Running FastVLM inference...', 'info');
+
+                // Generate description
+                const outputs = await visionModel.generate({
+                    ...inputs,
+                    max_new_tokens: 512,
+                    do_sample: false,           // Deterministic output
+                    repetition_penalty: 1.2,    // Avoid repetitive text
+                });
+
+                // Decode the output
+                const decoded = visionProcessor.batch_decode(
+                    outputs.slice(null, [inputs.input_ids.dims.at(-1), null]),
+                    { skip_special_tokens: true }
+                );
+
+                const description = decoded[0];
+
+                if (description) {
                     log(`Generated description: ${description}`, 'success');
 
                     // Send description through data channel
                     sendDescription(description);
+                } else {
+                    log('No description generated', 'error');
                 }
 
             } catch (error) {
                 log(`Frame processing error: ${error.message}`, 'error');
+                log('Error stack: ' + error.stack, 'error');
             } finally {
                 processingFrame = false;
             }
