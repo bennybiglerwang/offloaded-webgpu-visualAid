@@ -1,242 +1,218 @@
-# WebRTC Video Streaming - Phase 2 Implementation
+# OffloadedWebGPU - Visual Assistance System
 
-## 📁 Project Structure
+**An AI-powered visual assistance application for the visually impaired, providing real-time scene descriptions through WebRTC video streaming and GPU-accelerated FastVLM inference.**
 
-```
-webrtc-streaming/
-├── signaling-server.js    # WebSocket signaling server
-├── package.json           # Node.js dependencies
-├── sender.html           # Phone interface (video sender)
-├── receiver.html         # Laptop interface (video receiver)
-└── public/              # Static files directory
-    ├── sender.html      # (copy sender.html here)
-    └── receiver.html    # (copy receiver.html here)
-```
+## 🎯 Project Mission
 
-## 🚀 Setup Instructions
+Stream phone camera video to GPU-enabled devices for real-time AI scene description, delivered back to the phone via text-to-speech. Designed for visually impaired users with privacy-first local processing and offline capability.
 
-### Step 1: Install Dependencies
+---
+
+## 🚀 Quick Start (5 Minutes)
+
+### Prerequisites
+- Node.js 14+ and npm
+- Modern browser with WebGPU (Chrome 113+ or Edge 113+)
+- WiFi network (phone and laptop on same network)
+
+### Installation
 
 ```bash
+# 1. Clone repository
+git clone https://github.com/bennybiglerwang/offloaded-webgpu-visualAid.git
+cd OffloadedWebGPU
+
+# 2. Install dependencies
 npm install
+
+# 3. Generate HTTPS certificate (required for mobile camera access)
+./generate-cert.sh
+
+# 4. Start secure server
+node signaling-server-secure.js
 ```
 
-This will install:
-- `ws` - WebSocket server library
-- `express` - Web server for serving static files
+### Usage
 
-### Step 2: Create Public Directory
+**On Laptop (Receiver):**
+1. Open: `https://localhost:8080/receiver.html`
+2. Accept security warning (one-time)
+3. Click "Connect to Server"
+4. Wait for AI model to load (~3-5 min first time)
 
-```bash
-mkdir -p public
-cp sender.html public/
-cp receiver.html public/
-```
+**On Phone (Sender):**
+1. Find laptop IP: `ifconfig | grep inet` (Mac/Linux) or `ipconfig` (Windows)
+2. Open: `https://<LAPTOP_IP>:8080/sender.html`
+3. Accept security warning (one-time)
+4. Configure accessibility settings if needed
+5. Click "Start Camera" → Grant permission
+6. Click "Connect to Server"
+7. Point camera at objects/scenes → Hear AI descriptions! 🎉
 
-### Step 3: Start the Signaling Server
+---
 
-```bash
-node signaling-server.js
-```
+## 📚 Complete Documentation
 
-Or with auto-restart during development:
-```bash
-npm run dev
-```
+**For comprehensive information, see:**
 
-The server will start on port 8080 and display:
-```
-========================================
-Signaling Server running on port 8080
-WebSocket: ws://localhost:8080
-Status: http://localhost:8080/status
-TURN Server: turn:136.107.56.70:3478
-========================================
-```
+- **[CLAUDE.md](CLAUDE.md)** - Complete project guide (setup, architecture, AI details, troubleshooting)
+- **[HTTPS-CAMERA-SETUP.md](HTTPS-CAMERA-SETUP.md)** - Camera access and HTTPS troubleshooting
+- **[ARCHITECTURE.md](ARCHITECTURE.md)** - Technical architecture deep dive
+- **[TESTING-CHECKLIST.md](TESTING-CHECKLIST.md)** - Comprehensive testing procedures
 
-## 📱 Usage Instructions
+---
 
-### On Your Phone (Sender):
+## ✨ Key Features
 
-1. Connect to the same network as your laptop
-2. Open browser and navigate to: `http://<laptop-ip>:8080/sender.html`
-3. Click "Start Camera" and grant camera permissions
-4. Select your preferred settings (resolution, FPS, camera)
-5. Click "Connect to Server"
-6. Wait for receiver to connect
-7. Video will automatically start streaming when receiver is ready
+**🎥 Real-Time Video Streaming**
+- Phone to laptop video transmission via WebRTC
+- Adaptive quality (SD, HD, Full HD)
+- Low latency (~80-350ms)
 
-### On Your Laptop (Receiver):
+**🤖 AI Scene Description**
+- FastVLM-0.5B-ONNX model (120-160MB)
+- WebGPU hardware acceleration
+- Detailed scene understanding (objects, colors, spatial relationships)
+- 1 description every 3 seconds
 
-1. Open browser and navigate to: `http://localhost:8080/receiver.html`
-2. Click "Connect to Server"
-3. Wait for sender to connect
-4. Video stream will appear automatically
-5. Monitor connection metrics in real-time
+**♿ Accessibility Features**
+- Text-to-speech output with adjustable parameters
+- High contrast mode for low vision
+- Large text mode (18-24px fonts)
+- Screen wake lock (prevent dimming)
+- Haptic feedback on new descriptions
+- Persistent accessibility preferences
 
-## 🔍 Testing Locally (Same Machine)
+**🔒 Privacy & Offline**
+- All AI processing runs locally on GPU device
+- No cloud transmission of video or descriptions
+- Works on local network only (no internet needed after model download)
+- Model cached in browser (instant subsequent loads)
 
-For testing on the same machine:
+---
 
-1. Start the signaling server:
-   ```bash
-   node signaling-server.js
-   ```
-
-2. Open TWO browser windows:
-   - Window 1: `http://localhost:8080/sender.html`
-   - Window 2: `http://localhost:8080/receiver.html`
-
-3. In Sender window:
-   - Click "Start Camera"
-   - Click "Connect to Server"
-
-4. In Receiver window:
-   - Click "Connect to Server"
-   - Video should appear!
-
-## 🌐 Network Setup
-
-### Find Your Laptop's IP Address:
-
-**Windows:**
-```cmd
-ipconfig
-```
-Look for "IPv4 Address"
-
-**Mac/Linux:**
-```bash
-ifconfig | grep inet
-# or
-ip addr show
-```
-
-### Firewall Configuration:
-
-Make sure port 8080 is open:
-
-**Windows:**
-```powershell
-netsh advfirewall firewall add rule name="WebRTC Signaling" dir=in action=allow protocol=TCP localport=8080
-```
-
-**Linux (UFW):**
-```bash
-sudo ufw allow 8080/tcp
-```
-
-**Mac:**
-System Preferences → Security & Privacy → Firewall → Firewall Options → Add port 8080
-
-## 🔧 Configuration
-
-### Change Signaling Server Port:
-
-Edit `signaling-server.js`:
-```javascript
-const PORT = process.env.PORT || 8080; // Change 8080 to your port
-```
-
-### TURN Server Configuration:
-
-Already configured to use your TURN server at `turn:136.107.56.70:3478`
-
-The configuration is in `signaling-server.js`:
-```javascript
-const TURN_CONFIG = {
-    iceServers: [
-        {
-            urls: 'turn:136.107.56.70:3478',
-            username: 'user',
-            credential: 'pass'
-        },
-        {
-            urls: 'stun:136.107.56.70:3478'
-        }
-    ]
-};
-```
-
-## 📊 Monitoring
-
-### Check Server Status:
-
-```bash
-curl http://localhost:8080/status
-```
-
-Response:
-```json
-{
-  "sender": "connected",
-  "receiver": "connected",
-  "turnServer": "turn:136.107.56.70:3478"
-}
-```
-
-### View Logs:
-
-The server logs all signaling activity:
-- Connection/disconnection events
-- Offer/answer exchanges
-- ICE candidate exchanges
-- Errors
-
-Both sender and receiver pages also show real-time logs.
-
-## 🎬 Connection Flow
+## 🏗️ Project Structure
 
 ```
-1. Start Signaling Server (laptop)
-2. Sender opens sender.html → Starts camera → Connects to server
-3. Receiver opens receiver.html → Connects to server
-4. Signaling server matches sender and receiver
-5. Sender creates WebRTC offer → Sent via signaling server
-6. Receiver creates WebRTC answer → Sent via signaling server
-7. ICE candidates exchanged via signaling server
-8. Direct P2P connection established (or via TURN if needed)
-9. Video streams from phone to laptop!
+OffloadedWebGPU/
+├── public/
+│   ├── sender.html              # Phone interface (camera + TTS)
+│   └── receiver.html            # Laptop interface (AI inference)
+├── signaling-server-secure.js   # HTTPS signaling server (primary)
+├── signaling-server.js          # HTTP signaling server (local testing only)
+├── generate-cert.sh             # SSL certificate generator
+├── package.json                 # npm dependencies
+├── CLAUDE.md                    # Comprehensive documentation ⭐
+├── README.md                    # This file (quick start)
+├── HTTPS-CAMERA-SETUP.md        # HTTPS troubleshooting
+├── ARCHITECTURE.md              # Technical architecture
+└── TESTING-CHECKLIST.md         # Testing procedures
 ```
 
-## 🐛 Troubleshooting
+---
 
-### Issue: "Cannot connect to signaling server"
-- Check if server is running: `curl http://localhost:8080/status`
-- Check firewall settings
-- Verify correct IP address
+## 🔧 Common Issues & Quick Fixes
 
-### Issue: "Camera permission denied"
-- Check browser permissions
-- HTTPS may be required for camera access (use ngrok for testing)
-- Try a different browser
+### Camera Not Working on Phone
+**Problem:** "Camera access is not available" error
 
-### Issue: "WebRTC connection failed"
-- Check TURN server is running
-- Verify TURN credentials are correct
-- Check network connectivity between devices
-- Look at browser console for detailed errors
+**Solution:**
+1. Ensure using HTTPS: `https://<LAPTOP_IP>:8080/sender.html` (not `http://`)
+2. Accept browser security warning
+3. Grant camera permission when prompted
 
-### Issue: "Video not displaying"
-- Check if both peers are connected in logs
-- Verify WebRTC connection state is "connected"
-- Check browser console for errors
-- Try refreshing both pages
+**Details:** See [HTTPS-CAMERA-SETUP.md](HTTPS-CAMERA-SETUP.md)
 
-## 🔒 Security Notes
+---
 
-**For Production Use:**
-- Add authentication to signaling server
-- Use HTTPS (WSS for WebSocket)
-- Implement rate limiting
-- Add session tokens
-- Validate all incoming messages
-- Use secure TURN credentials
+### WebGPU Not Available
+**Problem:** "WebGPU not supported" error
 
-## 🆘 Support
+**Solution:**
+1. Use Chrome 113+ or Edge 113+
+2. Enable `chrome://flags/#enable-webgpu` if needed
+3. Update graphics drivers
+4. Falls back to WASM automatically (slower but functional)
 
-If you encounter issues:
-1. Check browser console logs (F12)
-2. Check signaling server terminal output
-3. Verify TURN server is accessible
-4. Test with both devices on same network first
+---
+
+### Model Download Slow/Stuck
+**Problem:** Model loading takes too long or fails
+
+**Solution:**
+1. Wait up to 5 minutes on first load (downloading 120-160MB)
+2. Check internet connection
+3. Check browser console for specific errors
+4. Clear IndexedDB and retry: DevTools → Application → Storage → Clear site data
+
+---
+
+### Connection Failed
+**Problem:** Can't establish WebRTC connection
+
+**Solution:**
+1. Verify both devices on same WiFi network
+2. Check signaling server is running
+3. Allow port 8080 through firewall
+4. Check logs in browser console and server terminal
+
+**Details:** See [CLAUDE.md - Troubleshooting](CLAUDE.md#troubleshooting)
+
+---
+
+## 📊 Current Status
+
+- **Phase 1:** ✅ Bidirectional Data Channels (Complete)
+- **Phase 2:** ✅ WebGPU + FastVLM Integration (Complete)
+- **Phase 3:** ✅ Accessibility Features (Complete)
+- **Phase 4:** 🚧 Offline/PWA (Planned)
+- **Phase 5:** 🚧 Performance Optimization (Planned)
+
+---
+
+## 🔐 Security Notes
+
+**Development (Current):**
+- Self-signed HTTPS certificates
+- Hardcoded TURN credentials
+- No authentication
+
+**Production Recommendations:**
+- Use Let's Encrypt or commercial SSL certificates
+- Implement authentication tokens
+- Rotate TURN credentials regularly
+- Add rate limiting to signaling server
+- Enable session management
+
+See [CLAUDE.md - Security](CLAUDE.md#security--privacy) for details.
+
+---
+
+## 🤝 Contributing
+
+Contributions welcome in:
+- Offline/PWA implementation (Phase 4)
+- Performance optimization (Phase 5)
+- Cross-platform testing (iOS/Android)
+- Accessibility improvements
+- Documentation improvements
+
+---
+
+## 📝 License
+
+[Include license information]
+
+---
+
+## 📞 Support
+
+- **Issues:** [GitHub Issues](https://github.com/bennybiglerwang/offloaded-webgpu-visualAid/issues)
+- **Repository:** [offloaded-webgpu-visualAid](https://github.com/bennybiglerwang/offloaded-webgpu-visualAid)
+- **Documentation:** [CLAUDE.md](CLAUDE.md) - Start here for comprehensive info
+
+---
+
+**Built with:** WebRTC, WebGPU, Transformers.js, FastVLM, Node.js, Express
+
+**Last Updated:** November 2025 | **Version:** Phase 3 Complete
