@@ -16,7 +16,7 @@
     "turn",
     "signaling"
   ],
-  "author": "",
+  "author": "Benny Bigler-Wang",
   "license": "MIT",
   "dependencies": {
     "ws": "^8.14.2",

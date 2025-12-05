@@ -285,6 +285,23 @@ dtype: {
 - **Network:** WiFi or local network for device communication
 - **GPU:** Recommended for receiver (WebGPU acceleration)
 
+### Browser Configuration
+
+**Chrome/Edge (Receiver):**
+1. **Enable WebGPU** (if not enabled by default):
+   - Navigate to `chrome://flags/#enable-unsafe-webgpu`
+   - Set to "Enabled"
+   - Restart browser
+2. **Verify WebGPU**: Check `chrome://gpu` for "WebGPU: Hardware accelerated"
+
+**Safari (iPhone Sender):**
+1. **Camera Permissions**: Settings → Safari → Camera → Allow
+2. **Certificate Trust** (self-signed certs): Settings → General → About → Certificate Trust Settings → Enable laptop certificate
+
+**Network/Firewall:**
+- Allow incoming connections on port 8080
+- macOS: System Preferences → Security & Privacy → Firewall → Add Node.js exception
+
 ### Installation Steps
 
 #### 1. Clone Repository

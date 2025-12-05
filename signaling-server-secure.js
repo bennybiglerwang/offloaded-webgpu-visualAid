@@ -16,6 +16,7 @@ const peers = {
 // TURN server configuration to send to clients
 const TURN_CONFIG = {
     iceServers: [
+        // Primary TURN server
         {
             urls: 'turn:136.107.56.70:3478',
             username: 'user',
@@ -23,6 +24,16 @@ const TURN_CONFIG = {
         },
         {
             urls: 'stun:136.107.56.70:3478'
+        },
+        // Fallback public STUN servers (in case primary is unreachable)
+        {
+            urls: 'stun:stun.l.google.com:19302'
+        },
+        {
+            urls: 'stun:stun1.l.google.com:19302'
+        },
+        {
+            urls: 'stun:stun2.l.google.com:19302'
         }
     ]
 };

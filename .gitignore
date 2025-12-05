@@ -1,0 +1,28 @@
+# Dependencies
+node_modules/
+
+# SSL Certificates (self-signed)
+cert.pem
+key.pem
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Temporary files
+*.log
+*.tmp
+*.temp
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Environment variables
+.env
+.env.local
+.env.*.local

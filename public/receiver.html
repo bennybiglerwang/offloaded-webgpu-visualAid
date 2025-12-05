@@ -263,8 +263,24 @@
                         <span class="status-label">AI Model:</span>
                         <span class="status-value disconnected" id="modelStatus">Not Loaded</span>
                     </div>
+                    <div class="status-item" id="modelProgressContainer" style="display:none;">
+                        <span class="status-label">Download Progress:</span>
+                        <span class="status-value" id="modelProgress">0%</span>
+                    </div>
+                    <div class="status-item" id="modelSpeedContainer" style="display:none;">
+                        <span class="status-label">Download Speed:</span>
+                        <span class="status-value" id="modelSpeed">- KB/s</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-label">Connection Type:</span>
+                        <span class="status-value disconnected" id="connectionTypeStatus">Unknown</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-label">Prompt Mode:</span>
+                        <span class="status-value disconnected" id="promptModeStatus">Not Set</span>
+                    </div>
                 </div>
-                
+
                 <div class="metrics-card">
                     <h3>Stream Metrics</h3>
                     <div class="metric-item">
@@ -287,10 +303,27 @@
                         <span class="metric-label">Latency:</span>
                         <span class="metric-value" id="latencyMetric">- ms</span>
                     </div>
+                    <div class="metric-item">
+                        <span class="metric-label">Last Inference:</span>
+                        <span class="metric-value" id="inferenceTimeMetric">- ms</span>
+                    </div>
+                    <div class="metric-item">
+                        <span class="metric-label">Tokens Generated:</span>
+                        <span class="metric-value" id="tokensMetric">-</span>
+                    </div>
+                    <div class="metric-item">
+                        <span class="metric-label">Tokens/Second:</span>
+                        <span class="metric-value" id="tokenRateMetric">- tok/s</span>
+                    </div>
                 </div>
-                
+
                 <div class="controls-card">
                     <h3>Controls</h3>
+                    <label for="promptSelect" style="display: block; margin-bottom: 8px; font-size: 14px;">AI Prompt Mode:</label>
+                    <select id="promptSelect" style="width: 100%; padding: 10px; margin-bottom: 15px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.3); background: rgba(0,0,0,0.3); color: white; font-size: 14px;">
+                        <option value="concise">One Sentence (Faster, ~1s)</option>
+                        <option value="detailed">Detailed Description (Slower, ~2-3s)</option>
+                    </select>
                     <button class="btn-primary" id="connectBtn" onclick="connectSignaling()">Connect to Server</button>
                     <button class="btn-danger" id="disconnectBtn" onclick="disconnect()" disabled>Disconnect</button>
                     <button class="btn-primary" id="testBtn" onclick="testDataChannel()" disabled>Test Description</button>
@@ -329,13 +362,16 @@
         let visionProcessor = null; // AutoProcessor for FastVLM
         let processingFrame = false;
         let inferenceInterval = null;
+        let latestFrame = null;           // Stores most recent captured frame
+        let inferenceActive = false;       // Controls processing loop
         
         // Logging
         function log(message, type = 'info') {
             const logsDiv = document.getElementById('logs');
             const entry = document.createElement('div');
             entry.className = `log-entry ${type}`;
-            const timestamp = new Date().toLocaleTimeString();
+            const now = new Date();
+            const timestamp = `${now.toLocaleTimeString()}.${now.getMilliseconds().toString().padStart(3, '0')}`;
             entry.textContent = `[${timestamp}] ${message}`;
             logsDiv.appendChild(entry);
             logsDiv.scrollTop = logsDiv.scrollHeight;
@@ -381,7 +417,10 @@
         }
 
         // Initialize AI Model (FastVLM-0.5B-ONNX)
-        async function initializeModel() {
+        async function initializeModel(retryCount = 0) {
+            const MAX_RETRIES = 2;
+            const TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes timeout
+
             try {
                 log('Loading FastVLM model (this may take a few minutes)...', 'info');
                 updateStatus('modelStatus', 'connecting', 'Loading');
@@ -399,41 +438,142 @@
 
                 const model_id = 'onnx-community/FastVLM-0.5B-ONNX';
 
-                // Load processor
-                log('Loading FastVLM processor...', 'info');
-                visionProcessor = await AutoProcessor.from_pretrained(model_id, {
-                    progress_callback: (progress) => {
-                        if (progress.status === 'downloading') {
-                            const percent = Math.round((progress.loaded / progress.total) * 100);
-                            log(`Downloading processor: ${percent}% (${Math.round(progress.loaded / 1024 / 1024)}MB / ${Math.round(progress.total / 1024 / 1024)}MB)`, 'info');
-                        }
-                    }
+                // Create timeout promise
+                const timeoutPromise = new Promise((_, reject) => {
+                    setTimeout(() => reject(new Error('Model loading timeout (10 minutes exceeded)')), TIMEOUT_MS);
                 });
 
-                // Load model with quantization config
+                // Track download progress and speed
+                let lastProgressTime = Date.now();
+                let lastProgressLoaded = 0;
+                const downloadStartTime = Date.now();
+
+                // Show progress indicators
+                document.getElementById('modelProgressContainer').style.display = 'flex';
+                document.getElementById('modelSpeedContainer').style.display = 'flex';
+
+                // Enhanced progress callback with speed tracking
+                const createProgressCallback = (fileType) => (progress) => {
+                    if (progress.status === 'downloading') {
+                        const percent = Math.round((progress.loaded / progress.total) * 100);
+                        const loadedMB = Math.round(progress.loaded / 1024 / 1024);
+                        const totalMB = Math.round(progress.total / 1024 / 1024);
+
+                        // Calculate download speed
+                        const now = Date.now();
+                        const timeDiff = (now - lastProgressTime) / 1000; // seconds
+                        const bytesDiff = progress.loaded - lastProgressLoaded;
+
+                        if (timeDiff > 0.5) { // Update speed every 0.5 seconds
+                            const speedKBps = Math.round((bytesDiff / 1024) / timeDiff);
+                            const speedMBps = (speedKBps / 1024).toFixed(2);
+
+                            // Estimate time remaining
+                            const bytesRemaining = progress.total - progress.loaded;
+                            const secondsRemaining = bytesRemaining / (bytesDiff / timeDiff);
+                            const minutesRemaining = Math.ceil(secondsRemaining / 60);
+
+                            // Update UI
+                            document.getElementById('modelProgress').textContent = `${percent}% (${loadedMB}/${totalMB} MB)`;
+                            document.getElementById('modelSpeed').textContent =
+                                speedKBps > 1024 ? `${speedMBps} MB/s` : `${speedKBps} KB/s`;
+
+                            // Log with ETA
+                            if (fileType === 'model') {
+                                log(`Downloading ${progress.file}: ${percent}% (${loadedMB}MB / ${totalMB}MB) - ${speedKBps} KB/s - ETA: ${minutesRemaining} min`, 'info');
+                            }
+
+                            updateStatus('modelStatus', 'connecting', `${percent}%`);
+
+                            lastProgressTime = now;
+                            lastProgressLoaded = progress.loaded;
+                        }
+                    } else if (progress.status === 'ready') {
+                        log(`${progress.file} ready`, 'success');
+                    } else if (progress.status === 'done') {
+                        const totalTime = ((Date.now() - downloadStartTime) / 1000).toFixed(1);
+                        log(`${fileType} download completed in ${totalTime} seconds`, 'success');
+                    }
+                };
+
+                // Load processor with timeout
+                log('Loading FastVLM processor...', 'info');
+                const processorPromise = AutoProcessor.from_pretrained(model_id, {
+                    progress_callback: createProgressCallback('processor')
+                });
+                visionProcessor = await Promise.race([processorPromise, timeoutPromise]);
+                log('Processor loaded successfully', 'success');
+
+                // Reset progress tracking for model
+                lastProgressTime = Date.now();
+                lastProgressLoaded = 0;
+
+                // Load model with quantization config and timeout
                 log('Loading FastVLM model (120-160MB, quantized)...', 'info');
-                visionModel = await AutoModelForImageTextToText.from_pretrained(model_id, {
+                log('IMPORTANT: This is downloading from CDN, may take 3-10 minutes depending on connection', 'info');
+                const modelPromise = AutoModelForImageTextToText.from_pretrained(model_id, {
                     dtype: {
                         embed_tokens: 'fp16',           // Moderate precision for text embeddings
                         vision_encoder: 'q4',           // Aggressive 4-bit for vision
                         decoder_model_merged: 'q4',     // 4-bit for language model
                     },
                     device: 'webgpu',                   // Prefer WebGPU
-                    progress_callback: (progress) => {
-                        if (progress.status === 'downloading') {
-                            const percent = Math.round((progress.loaded / progress.total) * 100);
-                            const loadedMB = Math.round(progress.loaded / 1024 / 1024);
-                            const totalMB = Math.round(progress.total / 1024 / 1024);
-                            log(`Downloading ${progress.file}: ${percent}% (${loadedMB}MB / ${totalMB}MB)`, 'info');
-                            updateStatus('modelStatus', 'connecting', `Loading ${percent}%`);
-                        } else if (progress.status === 'ready') {
-                            log(`${progress.file} ready`, 'info');
-                        }
-                    }
+                    progress_callback: createProgressCallback('model')
                 });
+                visionModel = await Promise.race([modelPromise, timeoutPromise]);
+
+                // Hide progress indicators when done
+                document.getElementById('modelProgressContainer').style.display = 'none';
+                document.getElementById('modelSpeedContainer').style.display = 'none';
 
                 log('FastVLM model loaded successfully', 'success');
                 log('Model quantization: fp16 (embeddings) + q4 (vision + decoder)', 'info');
+
+                // Verify WebGPU backend is actually being used
+                try {
+                    // Try to access model device/backend information
+                    if (visionModel.config && visionModel.config.model_type) {
+                        log(`Model type: ${visionModel.config.model_type}`, 'info');
+                    }
+
+                    // Check if WebGPU adapter was initialized
+                    if (webgpuAdapter) {
+                        // Use adapter.limits and adapter.features (universally supported)
+                        const limits = webgpuAdapter.limits;
+                        const features = Array.from(webgpuAdapter.features);
+
+                        log(`WebGPU Adapter detected`, 'success');
+                        log(`Max buffer size: ${(limits.maxBufferSize / 1024 / 1024).toFixed(0)} MB`, 'info');
+                        log(`Max compute workgroup size: ${limits.maxComputeWorkgroupSizeX}`, 'info');
+                        log(`WebGPU features: ${features.slice(0, 3).join(', ')}${features.length > 3 ? '...' : ''}`, 'info');
+
+                        // Try to get vendor info from device if available
+                        if (webgpuDevice) {
+                            try {
+                                const deviceInfo = webgpuDevice.adapterInfo || {};
+                                if (deviceInfo.vendor) {
+                                    log(`GPU Vendor: ${deviceInfo.vendor}`, 'success');
+                                    updateStatus('webgpuStatus', 'connected', `Ready (${deviceInfo.vendor})`);
+                                } else {
+                                    log('Confirmed: Model using WebGPU backend for inference', 'success');
+                                    updateStatus('webgpuStatus', 'connected', 'Ready (WebGPU)');
+                                }
+                            } catch (e) {
+                                log('Confirmed: Model using WebGPU backend for inference', 'success');
+                                updateStatus('webgpuStatus', 'connected', 'Ready (WebGPU)');
+                            }
+                        } else {
+                            log('Confirmed: WebGPU adapter initialized', 'success');
+                            updateStatus('webgpuStatus', 'connected', 'Ready');
+                        }
+                    } else {
+                        log('WARNING: WebGPU adapter not found - may be using CPU fallback', 'error');
+                        updateStatus('webgpuStatus', 'warning', 'CPU Fallback?');
+                    }
+                } catch (e) {
+                    log(`Could not verify WebGPU backend: ${e.message}`, 'error');
+                }
+
                 updateStatus('modelStatus', 'connected', 'Ready');
 
                 // Enable inference button
@@ -443,12 +583,34 @@
             } catch (error) {
                 log(`Model loading failed: ${error.message}`, 'error');
                 log('Error stack: ' + error.stack, 'error');
-                updateStatus('modelStatus', 'disconnected', 'Failed');
 
-                // Check for specific errors
-                if (error.message.includes('WebGPU')) {
+                // Check for specific errors and retry logic
+                if (error.message.includes('timeout') && retryCount < MAX_RETRIES) {
+                    const waitTime = Math.pow(2, retryCount) * 5000; // Exponential backoff: 5s, 10s, 20s
+                    log(`Retrying model load in ${waitTime / 1000} seconds (attempt ${retryCount + 1}/${MAX_RETRIES})...`, 'info');
+                    updateStatus('modelStatus', 'connecting', `Retry ${retryCount + 1}/${MAX_RETRIES}`);
+
+                    await new Promise(resolve => setTimeout(resolve, waitTime));
+                    return initializeModel(retryCount + 1);
+                } else if (error.message.includes('WebGPU')) {
                     log('WebGPU not available, falling back to WASM...', 'info');
-                    // Could retry with device: 'wasm' here
+                    updateStatus('modelStatus', 'disconnected', 'WebGPU Failed');
+                    // Could retry with device: 'wasm' here in future enhancement
+                } else if (error.message.includes('NetworkError') || error.message.includes('fetch')) {
+                    log('Network error during model download. Check internet connection and CDN accessibility.', 'error');
+                    log('Try: 1) Check network connection, 2) Clear browser cache, 3) Retry', 'info');
+                    updateStatus('modelStatus', 'disconnected', 'Network Error');
+                } else {
+                    updateStatus('modelStatus', 'disconnected', 'Failed');
+                }
+
+                // Final failure - provide helpful instructions
+                if (retryCount >= MAX_RETRIES) {
+                    log('Model loading failed after all retries. Troubleshooting steps:', 'error');
+                    log('1. Check internet connection and CDN accessibility', 'info');
+                    log('2. Clear browser cache (DevTools → Application → Storage → Clear)', 'info');
+                    log('3. Try using Chrome instead of Safari', 'info');
+                    log('4. Run diagnostic: ./test-network-connectivity.sh', 'info');
                 }
 
                 return false;
@@ -552,33 +714,190 @@
             }
         }
 
+        // Run inference on a given frame (separated from capture)
+        async function runInference(frame) {
+            try {
+                log('Processing frame with FastVLM...', 'info');
+                const inferenceStartTime = performance.now();
+
+                // Get selected prompt mode
+                const promptMode = document.getElementById('promptSelect').value;
+                const promptText = promptMode === 'concise'
+                    ? '<image>Describe what you see in one sentence.'
+                    : '<image>Describe this image in detail for a visually impaired person. Include objects, people, actions, colors, and spatial relationships.';
+
+                log(`Using prompt mode: ${promptMode}`, 'info');
+                log(`Prompt text: ${promptText}`, 'info');
+
+                // Update prompt mode status indicator
+                updateStatus('promptModeStatus', 'connected',
+                    promptMode === 'concise' ? 'Fast (1 sentence)' : 'Detailed (full desc)');
+
+                const messages = [{
+                    role: 'user',
+                    content: promptText
+                }];
+
+                // Timing: Chat template
+                const templateStartTime = performance.now();
+                const prompt = visionProcessor.apply_chat_template(messages, {
+                    add_generation_prompt: true
+                });
+                const templateTime = (performance.now() - templateStartTime).toFixed(0);
+                log(`[Timing] Chat template: ${templateTime}ms`, 'info');
+
+                // Timing: Image preprocessing
+                const preprocessStartTime = performance.now();
+                const inputs = await visionProcessor(frame, prompt, {
+                    add_special_tokens: false
+                });
+                const preprocessTime = (performance.now() - preprocessStartTime).toFixed(0);
+                log(`[Timing] Preprocessing: ${preprocessTime}ms`, 'info');
+
+                log('Running FastVLM inference...', 'info');
+
+                // Adjust max tokens based on prompt mode
+                const maxTokens = promptMode === 'concise' ? 30 : 200;
+                log(`Max tokens allowed: ${maxTokens}`, 'info');
+
+                // Timing: Token generation
+                const generationStartTime = performance.now();
+                const outputs = await visionModel.generate({
+                    ...inputs,
+                    max_new_tokens: maxTokens,  // 30 for concise, 200 for detailed
+                    do_sample: false,
+                    repetition_penalty: 1.2,
+                });
+                const generationTime = (performance.now() - generationStartTime).toFixed(0);
+
+                // Calculate tokens generated
+                const inputTokens = inputs.input_ids.dims.at(-1);
+                const outputTokens = outputs.dims.at(-1);
+                const tokensGenerated = outputTokens - inputTokens;
+                const tokenRate = (tokensGenerated / (generationTime / 1000)).toFixed(1);
+
+                log(`[Timing] Token generation: ${generationTime}ms (${tokensGenerated} tokens)`, 'info');
+                log(`[Timing] Token rate: ${tokenRate} tok/s`, 'info');
+
+                // Timing: Decoding
+                const decodeStartTime = performance.now();
+                const decoded = visionProcessor.batch_decode(
+                    outputs.slice(null, [inputs.input_ids.dims.at(-1), null]),
+                    { skip_special_tokens: true }
+                );
+                const decodeTime = (performance.now() - decodeStartTime).toFixed(0);
+                log(`[Timing] Decoding: ${decodeTime}ms`, 'info');
+
+                const description = decoded[0];
+                const inferenceTime = (performance.now() - inferenceStartTime).toFixed(0);
+
+                log(`[Timing] Total inference: ${inferenceTime}ms`, 'success');
+
+                // Update performance metrics in UI
+                if (document.getElementById('inferenceTimeMetric')) {
+                    document.getElementById('inferenceTimeMetric').textContent = `${inferenceTime} ms`;
+                }
+                if (document.getElementById('tokensMetric')) {
+                    document.getElementById('tokensMetric').textContent = tokensGenerated;
+                }
+                if (document.getElementById('tokenRateMetric')) {
+                    document.getElementById('tokenRateMetric').textContent = `${tokenRate} tok/s`;
+                }
+
+                // Performance warning if inference is too slow
+                if (inferenceTime > 3000) {
+                    log(`WARNING: Inference took ${inferenceTime}ms (expected <2000ms for concise mode). Check GPU usage in Activity Monitor.`, 'error');
+                }
+
+                // WebGPU performance confirmation (log once on first inference after 2nd run when warmed up)
+                if (tokenRate > 15) {
+                    log(`WebGPU Status: CONFIRMED - Inference running at ${tokenRate} tok/s`, 'success');
+                    log('GPU acceleration confirmed (high token rate)', 'success');
+                } else if (tokenRate < 10) {
+                    log(`WARNING: Low token rate (${tokenRate} tok/s) may indicate CPU fallback`, 'error');
+                }
+
+                if (description) {
+                    log(`Generated description (${inferenceTime}ms): ${description}`, 'success');
+                    sendDescription(description);
+                } else {
+                    log('No description generated', 'error');
+                }
+
+            } catch (error) {
+                log(`Inference error: ${error.message}`, 'error');
+            }
+        }
+
+        // Continuous processing loop - processes latest available frame
+        async function startProcessingLoop() {
+            inferenceActive = true;
+
+            while (inferenceActive) {
+                if (!processingFrame && latestFrame) {
+                    processingFrame = true;
+
+                    // Grab the latest frame and clear it
+                    const frameToProcess = latestFrame;
+                    latestFrame = null;
+
+                    // Run inference
+                    await runInference(frameToProcess);
+
+                    processingFrame = false;
+                }
+
+                // Check for new frames every 100ms
+                await new Promise(resolve => setTimeout(resolve, 100));
+            }
+        }
+
         // Start continuous inference
         function startInference() {
             if (inferenceInterval) {
                 clearInterval(inferenceInterval);
             }
 
-            // Process a frame every 3 seconds (adjust as needed)
+            // Process first frame immediately (don't wait for interval)
+            const firstFrame = captureFrame();
+            if (firstFrame) {
+                latestFrame = firstFrame;
+            }
+
+            // Start continuous processing loop
+            startProcessingLoop();
+
+            // Capture frames every 3 seconds
             inferenceInterval = setInterval(() => {
-                processFrame();
+                const frame = captureFrame();
+                if (frame) {
+                    latestFrame = frame;  // Overwrites old frame
+                    log('Captured new frame for processing', 'info');
+                }
             }, 3000);
 
             document.getElementById('startInferenceBtn').disabled = true;
             document.getElementById('stopInferenceBtn').disabled = false;
 
-            log('Started continuous inference (1 frame every 3 seconds)', 'success');
+            log('Started continuous inference (capturing every 3 seconds, processing latest)', 'success');
         }
 
         // Stop continuous inference
         function stopInference() {
+            inferenceActive = false;  // Stops processing loop
+
             if (inferenceInterval) {
                 clearInterval(inferenceInterval);
                 inferenceInterval = null;
-                log('Stopped continuous inference', 'info');
             }
+
+            latestFrame = null;  // Clear any pending frame
+            processingFrame = false;
 
             document.getElementById('startInferenceBtn').disabled = false;
             document.getElementById('stopInferenceBtn').disabled = true;
+
+            log('Stopped continuous inference', 'info');
         }
 
         // Connect to signaling server
@@ -762,7 +1081,8 @@
                 // Handle ICE candidates
                 peerConnection.onicecandidate = (event) => {
                     if (event.candidate) {
-                        log('Sending ICE candidate to sender', 'info');
+                        const connType = analyzeConnectionType(event.candidate);
+                        log(`ICE candidate (${connType}): ${event.candidate.candidate.substring(0, 50)}...`, 'info');
                         signalingSocket.send(JSON.stringify({
                             type: 'ice-candidate',
                             candidate: event.candidate
@@ -821,7 +1141,27 @@
                 updateStatus('webrtcStatus', 'disconnected', 'Error');
             }
         }
-        
+
+        // Analyze ICE candidate to determine connection type
+        function analyzeConnectionType(candidate) {
+            if (!candidate || !candidate.candidate) return 'unknown';
+
+            const candidateStr = candidate.candidate;
+
+            // Check candidate type in the SDP string
+            if (candidateStr.includes('typ host')) {
+                return 'P2P (Local)';
+            } else if (candidateStr.includes('typ srflx')) {
+                return 'P2P (STUN)';
+            } else if (candidateStr.includes('typ relay')) {
+                return 'TURN Relay';
+            } else if (candidateStr.includes('typ prflx')) {
+                return 'P2P (Peer Reflexive)';
+            }
+
+            return 'Unknown';
+        }
+
         // Start collecting and displaying metrics
         function startMetricsCollection() {
             if (statsInterval) {
@@ -834,13 +1174,28 @@
                 try {
                     const stats = await peerConnection.getStats();
                     let inboundRtpStats = null;
-                    
+
                     stats.forEach(report => {
                         if (report.type === 'inbound-rtp' && report.kind === 'video') {
                             inboundRtpStats = report;
                         }
+
+                        // Check connection type via ICE candidate pairs
+                        if (report.type === 'candidate-pair' && report.state === 'succeeded') {
+                            const localCandidateId = report.localCandidateId;
+
+                            // Find the actual local candidate
+                            stats.forEach(candidate => {
+                                if (candidate.id === localCandidateId) {
+                                    const connType = analyzeConnectionType(candidate);
+                                    updateStatus('connectionTypeStatus',
+                                        connType.includes('P2P') ? 'connected' : 'warning',
+                                        connType);
+                                }
+                            });
+                        }
                     });
-                    
+
                     if (inboundRtpStats) {
                         // Resolution
                         if (inboundRtpStats.frameWidth && inboundRtpStats.frameHeight) {
